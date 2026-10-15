@@ -12,6 +12,7 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/events"
 	"github.com/wailsapp/wails/v3/pkg/services/notifications"
 
+	"github.com/cknm-cmd/cardhaul/internal/autostart"
 	"github.com/cknm-cmd/cardhaul/internal/config"
 	"github.com/cknm-cmd/cardhaul/internal/engine"
 )
@@ -35,6 +36,11 @@ func main() {
 		log.Fatal(err)
 	}
 	configDir, _ := config.Dir()
+	// Re-register start-at-login on every launch, so it points at wherever CardHaul now lives
+	// (a moved portable .exe, or the copy an installer just put in place).
+	if store.Settings().StartAtLogin {
+		_ = autostart.Set(true)
+	}
 	notifier := notifications.New()
 
 	app := application.New(application.Options{

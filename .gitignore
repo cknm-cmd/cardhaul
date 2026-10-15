@@ -13,3 +13,4 @@ build/android/gen/
 google-client.json
 client_secret*.json
 .env.local
+dist
