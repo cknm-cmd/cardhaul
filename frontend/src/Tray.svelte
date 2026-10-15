@@ -72,7 +72,7 @@
     {:else}
       <div class="muted">{s.paused ? 'Auto-upload is paused.' : 'Plug in a device to start an upload.'}</div>
       {#if s.cancelled?.length}
-        <div class="faint small">Skipped until unplugged: {s.cancelled.join(', ')}</div>
+        <div class="small">{s.cancelled.join(', ')}: cancelled. It'll upload next time it's plugged in.</div>
       {/if}
       {#if s.last}
         <div class="faint small last">Last: {s.last.device} · {s.last.result} · {when(s.last.finished)}</div>
@@ -94,7 +94,11 @@
     {:else if s.phase === 'problem'}
       <button class="item" onclick={() => act(AppService.CheckNow)}>Check again</button>
     {:else}
-      <button class="item" onclick={() => act(AppService.CheckNow)}>Check devices now</button>
+      {#if s.cancelled?.length}
+        <button class="item strong" onclick={() => act(AppService.CheckNow)}>Start {s.cancelled.join(', ')} again</button>
+      {:else}
+        <button class="item" onclick={() => act(AppService.CheckNow)}>Check devices now</button>
+      {/if}
       {#if s.paused}
         <button class="item" onclick={() => act(AppService.Resume)}>Resume auto-upload</button>
       {:else}
@@ -119,4 +123,5 @@
   .sep { border-top: 1px solid var(--line); margin: 4px 0; }
   .item { display: block; width: 100%; text-align: left; border: none; background: none; padding: 6px 10px; border-radius: 6px; }
   .item:hover { background: var(--bg-soft); }
+  .item.strong { color: var(--accent); font-weight: 500; }
 </style>

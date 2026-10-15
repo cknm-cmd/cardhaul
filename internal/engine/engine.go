@@ -101,6 +101,11 @@ func New(store *config.Store, configDir string, onChange func(Snapshot), notify 
 		kick:      make(chan struct{}, 1),
 	}
 	e.snap.Phase = PhaseIdle
+	for label, st := range store.DeviceStates() {
+		if st.CancelledConnection != "" {
+			e.cancelled[label] = st.CancelledConnection // cancels survive an app restart
+		}
+	}
 	if h := store.History(); len(h) > 0 {
 		e.snap.Last = &h[0]
 	}
@@ -167,9 +172,7 @@ func (e *Engine) Pause() {
 
 func (e *Engine) Resume() {
 	_ = e.store.UpdateSettings(func(s *config.Settings) { s.Paused = false })
-	e.mu.Lock()
-	e.cancelled = map[string]string{}
-	e.mu.Unlock()
+	e.clearCancels()
 	e.update(func(*Snapshot) {})
 	e.Kick()
 }
@@ -180,6 +183,9 @@ func (e *Engine) Cancel() {
 	for _, d := range e.store.Settings().Devices {
 		if v, ok := volumes.Find(d.Label); ok {
 			e.cancelled[d.Label] = v.ConnectionID
+			st := e.store.DeviceState(d.Label)
+			st.CancelledConnection = v.ConnectionID
+			_ = e.store.SetDeviceState(d.Label, st)
 		}
 	}
 	e.mu.Unlock()
@@ -189,15 +195,28 @@ func (e *Engine) Cancel() {
 
 // CheckNow forgets cancels and failed checks for connected devices, then checks them again.
 func (e *Engine) CheckNow() {
-	e.mu.Lock()
-	e.cancelled = map[string]string{}
-	e.mu.Unlock()
+	e.clearCancels()
 	for _, d := range e.store.Settings().Devices {
 		st := e.store.DeviceState(d.Label)
 		st.FailedFingerprint = ""
 		_ = e.store.SetDeviceState(d.Label, st)
 	}
 	e.Kick()
+}
+
+func (e *Engine) clearCancels() {
+	e.mu.Lock()
+	labels := make([]string, 0, len(e.cancelled))
+	for label := range e.cancelled {
+		labels = append(labels, label)
+	}
+	e.cancelled = map[string]string{}
+	e.mu.Unlock()
+	for _, label := range labels {
+		st := e.store.DeviceState(label)
+		st.CancelledConnection = ""
+		_ = e.store.SetDeviceState(label, st)
+	}
 }
 
 func (e *Engine) stopJob() {
@@ -218,10 +237,12 @@ func (e *Engine) scan() {
 
 	var connected []string
 	e.mu.Lock()
+	var ended []string
 	for label, conn := range e.cancelled {
 		// A cancel lasts only while the device stays plugged in.
 		if v, ok := mounted[label]; !ok || v.ConnectionID != conn {
 			delete(e.cancelled, label)
+			ended = append(ended, label)
 		}
 	}
 	for _, d := range settings.Devices {
@@ -231,6 +252,11 @@ func (e *Engine) scan() {
 	}
 	busy := e.busy
 	e.mu.Unlock()
+	for _, label := range ended {
+		st := e.store.DeviceState(label)
+		st.CancelledConnection = ""
+		_ = e.store.SetDeviceState(label, st)
+	}
 	e.update(func(s *Snapshot) { s.Connected = connected })
 
 	if busy || settings.Paused || gauth.LoadToken() == nil {
@@ -394,7 +420,7 @@ func (e *Engine) runJob(ctx context.Context, d config.Device, v volumes.Volume) 
 			measured := float64(totalBytes) / 1e6 / time.Since(verifyStart).Seconds()
 			_ = e.store.UpdateSettings(func(s *config.Settings) { s.VerifyMBPerSec = 0.5*s.VerifyMBPerSec + 0.5*measured })
 		}
-		_ = e.store.SetDeviceState(d.Label, config.DeviceState{VerifiedFingerprint: fingerprint})
+		_ = e.store.SetDeviceState(d.Label, config.DeviceState{VerifiedFingerprint: fingerprint, CancelledConnection: e.store.DeviceState(d.Label).CancelledConnection})
 		msg := fmt.Sprintf("%d files are safely in Google Drive. Safe to clear the device.", len(files))
 		e.finish(d, &run, "verified", msg)
 		e.notify("✅ "+d.Label+": upload verified", msg)
@@ -406,6 +432,7 @@ func (e *Engine) runJob(ctx context.Context, d config.Device, v volumes.Volume) 
 	_ = e.store.SetDeviceState(d.Label, config.DeviceState{
 		VerifiedFingerprint: state.VerifiedFingerprint,
 		FailedFingerprint:   fingerprint + "|" + v.ConnectionID,
+		CancelledConnection: e.store.DeviceState(d.Label).CancelledConnection,
 	})
 	msg := fmt.Sprintf("%d file(s) didn't verify. The other %d are fine. Don't clear the device yet.", len(bad), len(files)-len(bad))
 	if len(bad) == 0 {

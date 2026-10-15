@@ -40,6 +40,8 @@ type Settings struct {
 type DeviceState struct {
 	VerifiedFingerprint string `json:"verifiedFingerprint,omitempty"`
 	FailedFingerprint   string `json:"failedFingerprint,omitempty"`
+	// CancelledConnection is set by Cancel: the device is skipped until this connection ends.
+	CancelledConnection string `json:"cancelledConnection,omitempty"`
 }
 
 // Run is one entry in the upload history.
@@ -128,6 +130,17 @@ func (s *Store) SetDeviceState(label string, st DeviceState) error {
 	defer s.mu.Unlock()
 	s.states[label] = st
 	return writeJSON(filepath.Join(s.dir, "devices-state.json"), s.states)
+}
+
+// DeviceStates returns a copy of every device's saved state.
+func (s *Store) DeviceStates() map[string]DeviceState {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make(map[string]DeviceState, len(s.states))
+	for k, v := range s.states {
+		out[k] = v
+	}
+	return out
 }
 
 func (s *Store) History() []Run {

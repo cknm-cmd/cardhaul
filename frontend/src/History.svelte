@@ -6,7 +6,7 @@
   import { bytes, when } from './lib/format'
 
   let runs = $state<Run[]>([])
-  const load = async () => (runs = await AppService.History())
+  const load = async () => (runs = (await AppService.History()) ?? [])
   onMount(load)
   // Refresh whenever a run finishes.
   $effect(() => { live.s?.last; load() })

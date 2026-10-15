@@ -25,7 +25,7 @@
 
   async function load() {
     settings = await AppService.Settings()
-    const history = await AppService.History()
+    const history = (await AppService.History()) ?? []
     lastBytes = history.find((r) => r.bytes > 0)?.bytes ?? 100e9
     estimate = (await AppService.VerifyEstimate(lastBytes)) as Record<string, number>
     if (signedIn) loadAccount()
@@ -45,7 +45,7 @@
   async function signOut() { await AppService.SignOut(); account = null }
 
   async function startAdd() {
-    available = await AppService.AvailableVolumes()
+    available = (await AppService.AvailableVolumes()) ?? []
     chosen = available[0]?.label ?? ''
     if (chosen) folder = await AppService.SuggestFolder(chosen)
     adding = true
