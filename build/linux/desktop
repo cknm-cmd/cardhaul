@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Name=CardHaul
+Comment=Uploads new camera footage one-way to Google Drive and verifies it
+# The Exec line includes %u to pass the URL to the application
+Exec=/usr/local/bin/CardHaul %u
+Terminal=false
+Type=Application
+Icon=CardHaul
+Categories=Utility;
+StartupWMClass=CardHaul
+
+ 
