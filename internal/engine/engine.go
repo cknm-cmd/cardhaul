@@ -56,6 +56,7 @@ type FileProgress struct {
 // Snapshot is everything the UI shows. It's sent to the frontend on every change.
 type Snapshot struct {
 	Phase        Phase          `json:"phase"`
+	VerifyMode   string         `json:"verifyMode"` // mode the current check is actually using
 	Paused       bool           `json:"paused"`
 	SignedIn     bool           `json:"signedIn"`
 	Device       string         `json:"device"`
@@ -395,12 +396,14 @@ func (e *Engine) runJob(ctx context.Context, d config.Device, v volumes.Volume) 
 		}
 	}
 
-	// Verify
+	// Verify. Re-read settings now: the user may have changed the verify mode during the upload.
+	settings = e.store.Settings()
 	verifyStart := time.Now()
 	vCtx, ci := rfs.AddConfig(accounting.WithStatsGroup(jobCtx, group+"-check"))
 	ci.SizeOnly = settings.Verify == config.VerifySize
 	e.update(func(s *Snapshot) {
 		s.Phase, s.Message, s.Current = PhaseVerifying, "", nil
+		s.VerifyMode = string(settings.Verify)
 		s.FilesTotal, s.FilesDone, s.BytesTotal, s.BytesDone = len(files), 0, totalBytes, 0
 		s.ETA = e.verifyEstimate(totalBytes, settings)
 	})
@@ -534,8 +537,11 @@ func (e *Engine) watchStats(ctx context.Context, group string, phase Phase) (sto
 						s.Current = append(s.Current, FileProgress{Name: name})
 					}
 					// Checksums read every byte back from the device: estimate from the measured speed.
-					s.ETA = e.verifyEstimate(s.BytesTotal, settings) - s.Elapsed
-					if settings.Verify == config.VerifySize || s.ETA < 0 {
+					// Use the mode this check started with, not whatever the setting says now.
+					mode := settings
+					mode.Verify = config.VerifyMode(s.VerifyMode)
+					s.ETA = e.verifyEstimate(s.BytesTotal, mode) - s.Elapsed
+					if mode.Verify == config.VerifySize || s.ETA < 0 {
 						s.ETA = -1
 					}
 				}

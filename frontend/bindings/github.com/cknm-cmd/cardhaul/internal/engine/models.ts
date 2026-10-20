@@ -29,6 +29,11 @@ export enum Phase {
  */
 export interface Snapshot {
     "phase": Phase;
+
+    /**
+     * mode the current check is actually using
+     */
+    "verifyMode": string;
     "paused": boolean;
     "signedIn": boolean;
     "device": string;

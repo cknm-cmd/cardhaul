@@ -50,7 +50,7 @@
         {bytes(s.speed)}/s{#if s.current?.length} · {shortName(s.current[0].name)} {s.current[0].percent}%{/if}
       </div>
     {:else if s.phase === 'verifying'}
-      <div>Checking files against Drive</div>
+      <div>Checking files against Drive <span class="faint small">({s.verifyMode === 'size' ? 'size only' : 'checksum'})</span></div>
       <div class="bar"><div style="width:{checkPct}%"></div></div>
       <div class="row between muted small">
         <span>{s.filesDone} of {s.filesTotal} files checked</span>
