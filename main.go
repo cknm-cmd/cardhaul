@@ -36,6 +36,8 @@ func main() {
 		log.Fatal(err)
 	}
 	configDir, _ := config.Dir()
+	setupLogging(configDir)
+	log.Printf("CardHaul %s starting", appVersion)
 	// Re-register start-at-login on every launch, so it points at wherever CardHaul now lives
 	// (a moved portable .exe, or the copy an installer just put in place).
 	if store.Settings().StartAtLogin {

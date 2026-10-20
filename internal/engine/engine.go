@@ -4,6 +4,7 @@ package engine
 
 import (
 	"bytes"
+	"log"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -87,6 +88,9 @@ type Engine struct {
 	busy      bool
 	cancelJob context.CancelFunc
 	cancelled map[string]string // device label -> connection ID it was cancelled for
+	// checked remembers devices already handled on their current connection, so the 2-second
+	// device poll doesn't re-check (and re-query Drive) the same plugged-in device forever.
+	checked map[string]string
 	kick      chan struct{}
 }
 
@@ -99,6 +103,7 @@ func New(store *config.Store, configDir string, onChange func(Snapshot), notify 
 		onChange:  onChange,
 		notify:    notify,
 		cancelled: map[string]string{},
+		checked:   map[string]string{},
 		kick:      make(chan struct{}, 1),
 	}
 	e.snap.Phase = PhaseIdle
@@ -212,6 +217,7 @@ func (e *Engine) clearCancels() {
 		labels = append(labels, label)
 	}
 	e.cancelled = map[string]string{}
+	e.checked = map[string]string{}
 	e.mu.Unlock()
 	for _, label := range labels {
 		st := e.store.DeviceState(label)
@@ -246,6 +252,11 @@ func (e *Engine) scan() {
 			ended = append(ended, label)
 		}
 	}
+	for label, conn := range e.checked {
+		if v, ok := mounted[label]; !ok || v.ConnectionID != conn {
+			delete(e.checked, label) // unplugged or replugged: check it next time
+		}
+	}
 	for _, d := range settings.Devices {
 		if _, ok := mounted[d.Label]; ok {
 			connected = append(connected, d.Label)
@@ -270,6 +281,9 @@ func (e *Engine) scan() {
 		}
 		e.mu.Lock()
 		_, skip := e.cancelled[d.Label]
+		if e.checked[d.Label] == v.ConnectionID {
+			skip = true
+		}
 		e.mu.Unlock()
 		if skip {
 			continue
@@ -291,6 +305,7 @@ func (e *Engine) startJob(d config.Device, v volumes.Volume) {
 			e.mu.Lock()
 			e.busy = false
 			e.cancelJob = nil
+			e.checked[d.Label] = v.ConnectionID
 			e.mu.Unlock()
 			e.Kick() // another device may be waiting
 		}()
@@ -328,6 +343,7 @@ func (e *Engine) runJob(ctx context.Context, d config.Device, v volumes.Volume) 
 	for _, f := range files {
 		totalBytes += f.size
 	}
+	log.Printf("%s: %d files (%s) on device, connection %s", d.Label, len(files), humanBytes(totalBytes), v.ConnectionID)
 	state := e.store.DeviceState(d.Label)
 
 	e.update(func(s *Snapshot) {
@@ -335,11 +351,19 @@ func (e *Engine) runJob(ctx context.Context, d config.Device, v volumes.Volume) 
 		s.Current, s.ProblemFiles = nil, nil
 	})
 
-	dstFs, tokenMap, err := e.driveFs(ctx, d)
+	// Comparing with Drive should take seconds; don't let a stuck connection hang the app.
+	scanCtx, scanCancel := context.WithTimeout(ctx, 3*time.Minute)
+	defer scanCancel()
+	started := time.Now()
+	dstFs, tokenMap, err := e.driveFs(scanCtx, d)
 	if err != nil {
-		e.problem(d, "Couldn't reach Google Drive: "+err.Error(), nil)
+		log.Printf("%s: connecting to Google Drive failed after %s: %v", d.Label, time.Since(started).Round(time.Second), err)
+		if ctx.Err() == nil {
+			e.problem(d, "Couldn't reach Google Drive: "+friendlyErr(err), nil)
+		}
 		return
 	}
+	log.Printf("%s: connected to Google Drive in %s", d.Label, time.Since(started).Round(time.Millisecond))
 	defer e.persistToken(tokenMap)
 	srcFs, err := local.NewFs(ctx, "device", src, configmap.Simple{})
 	if err != nil {
@@ -348,13 +372,16 @@ func (e *Engine) runJob(ctx context.Context, d config.Device, v volumes.Volume) 
 	}
 
 	existing := map[string]bool{}
-	if err := operations.ListFn(ctx, dstFs, func(o rfs.Object) { existing[o.Remote()] = true }); err != nil && !errors.Is(err, rfs.ErrorDirNotFound) {
+	started = time.Now()
+	if err := operations.ListFn(scanCtx, dstFs, func(o rfs.Object) { existing[o.Remote()] = true }); err != nil && !errors.Is(err, rfs.ErrorDirNotFound) {
+		log.Printf("%s: listing the Drive folder failed after %s: %v", d.Label, time.Since(started).Round(time.Second), err)
 		if ctx.Err() != nil {
 			return
 		}
-		e.problem(d, "Couldn't list your Drive folder: "+err.Error(), nil)
+		e.problem(d, "Couldn't list your Drive folder: "+friendlyErr(err), nil)
 		return
 	}
+	log.Printf("%s: %d files already in Drive (listed in %s)", d.Label, len(existing), time.Since(started).Round(time.Millisecond))
 	var pending []localFile
 	var pendingBytes int64
 	for _, f := range files {
@@ -369,6 +396,7 @@ func (e *Engine) runJob(ctx context.Context, d config.Device, v volumes.Volume) 
 		return
 	}
 
+	log.Printf("%s: %d new files to upload (%s)", d.Label, len(pending), humanBytes(pendingBytes))
 	run := config.Run{Device: d.Label, Started: time.Now(), Files: len(pending), Bytes: pendingBytes}
 	jobCtx := filterContext(ctx, settings.SkipFiles)
 	group := fmt.Sprintf("job-%d", time.Now().UnixNano())
@@ -384,8 +412,10 @@ func (e *Engine) runJob(ctx context.Context, d config.Device, v volumes.Volume) 
 			s.BytesTotal, s.FilesTotal, s.BytesDone, s.FilesDone = pendingBytes, len(pending), 0, 0
 		})
 		stop := e.watchStats(upCtx, group+"-up", PhaseUploading)
+		started = time.Now()
 		err = rsync.CopyDir(upCtx, dstFs, srcFs, false)
 		stop()
+		log.Printf("%s: upload finished in %s (err: %v)", d.Label, time.Since(started).Round(time.Second), err)
 		if e.stopped(ctx, d, v, &run) {
 			return
 		}
@@ -407,6 +437,7 @@ func (e *Engine) runJob(ctx context.Context, d config.Device, v volumes.Volume) 
 		s.FilesTotal, s.FilesDone, s.BytesTotal, s.BytesDone = len(files), 0, totalBytes, 0
 		s.ETA = e.verifyEstimate(totalBytes, settings)
 	})
+	log.Printf("%s: verifying %d files (%s) by %s", d.Label, len(files), humanBytes(totalBytes), settings.Verify)
 	stop := e.watchStats(vCtx, group+"-check", PhaseVerifying)
 	var differ, missing, failed bytes.Buffer
 	err = operations.Check(vCtx, &operations.CheckOpt{
@@ -414,6 +445,7 @@ func (e *Engine) runJob(ctx context.Context, d config.Device, v volumes.Volume) 
 		Differ: &differ, MissingOnDst: &missing, Error: &failed,
 	})
 	stop()
+	log.Printf("%s: verification finished in %s (err: %v)", d.Label, time.Since(verifyStart).Round(time.Second), err)
 	if e.stopped(ctx, d, v, &run) {
 		return
 	}
@@ -467,6 +499,7 @@ func (e *Engine) stopped(ctx context.Context, d config.Device, v volumes.Volume,
 }
 
 func (e *Engine) finish(d config.Device, run *config.Run, result, msg string) {
+	log.Printf("%s: run finished: %s. %s", d.Label, result, msg)
 	run.Finished, run.Result, run.Message = time.Now(), result, msg
 	_ = e.store.AddRun(*run)
 	r := *run
@@ -474,6 +507,7 @@ func (e *Engine) finish(d config.Device, run *config.Run, result, msg string) {
 }
 
 func (e *Engine) problem(d config.Device, msg string, files []string) {
+	log.Printf("%s: problem: %s %v", d.Label, msg, files)
 	e.update(func(s *Snapshot) {
 		s.Phase, s.Device, s.Message, s.ProblemFiles, s.Current = PhaseProblem, d.Label, msg, files, nil
 	})
@@ -666,6 +700,14 @@ func lines(chunks ...string) []string {
 		}
 	}
 	return out
+}
+
+// friendlyErr turns a timeout into something a person can act on.
+func friendlyErr(err error) string {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "Google Drive didn't respond within 3 minutes. Check your internet connection, then choose Check again."
+	}
+	return err.Error()
 }
 
 func humanBytes(n int64) string {

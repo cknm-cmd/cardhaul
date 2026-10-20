@@ -19,7 +19,7 @@
 </script>
 
 <main>
-  <h1>History</h1>
+  <div class="head"><h1>History</h1><button class="link" onclick={() => AppService.OpenLog()}>Show log</button></div>
   {#if runs.length === 0}
     <p class="muted">Your uploads will appear here.</p>
   {:else}
@@ -44,6 +44,7 @@
 
 <style>
   main { padding: 20px 24px; }
+  .head { display: flex; align-items: baseline; justify-content: space-between; }
   table { width: 100%; border-collapse: collapse; margin-top: 14px; }
   th { text-align: left; font-weight: 500; color: var(--muted); font-size: 12px; padding: 6px 8px; border-bottom: 1px solid var(--line); }
   td { padding: 8px; border-bottom: 1px solid var(--line); }

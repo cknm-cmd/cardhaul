@@ -122,6 +122,11 @@ func (s *AppService) Account() (gauth.Account, error) {
 
 func (s *AppService) History() []config.Run { return s.store.History() }
 
+// OpenLog shows CardHaul's log file (useful when something goes wrong).
+func (s *AppService) OpenLog() error {
+	return browser.OpenFile(LogPath(s.configDir))
+}
+
 // VerifyEstimate returns how long checking the given number of bytes would take in each mode.
 func (s *AppService) VerifyEstimate(totalBytes int64) map[string]float64 {
 	mbps := s.store.Settings().VerifyMBPerSec

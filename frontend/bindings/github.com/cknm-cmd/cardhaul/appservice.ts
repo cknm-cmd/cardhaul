@@ -65,6 +65,13 @@ export function OpenHistory(): $CancellablePromise<void> {
     return $Call.ByID(3558381394);
 }
 
+/**
+ * OpenLog shows CardHaul's log file (useful when something goes wrong).
+ */
+export function OpenLog(): $CancellablePromise<void> {
+    return $Call.ByID(36218456);
+}
+
 export function OpenSettings(): $CancellablePromise<void> {
     return $Call.ByID(717766711);
 }
