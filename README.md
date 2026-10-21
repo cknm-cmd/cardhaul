@@ -58,10 +58,29 @@ CardHaul isn't signed with a paid Apple or Microsoft certificate yet, so your sy
   and click **Open Anyway** next to the CardHaul message.
 - **Windows:** on "Windows protected your PC", click **More info → Run anyway**.
 
+### Google sign-in: "Google hasn't verified this app"
+
+When you sign in, Google shows a warning that it hasn't verified CardHaul. Here's what that means:
+
+- **What CardHaul asks for:** only the `drive.file` permission, Google's narrowest Drive access. CardHaul can see
+  and manage **only the files and folders it creates**. It can't read anything else in your Drive. Google classes this
+  permission as non-sensitive and confirms it **needs no security review**.
+- **Why the warning appears:** Google shows it until an app's *branding* (its name and website) is verified, and that
+  requires the website to be on a domain the developer owns and proves through DNS. CardHaul's pages are currently
+  hosted on GitHub Pages (`cknm-cmd.github.io`), which can't be verified that way, so the warning stays for now.
+  It says nothing about what the app does with your data.
+- **How to continue:** on the warning screen, click **Advanced** (if shown), then **Go to CardHaul** / **Continue**,
+  and allow access. You only do this when signing in.
+- **Prefer not to?** You can [build CardHaul yourself](#building-from-source) with your own Google Cloud project,
+  so the sign-in uses a client you control. The source code is all here to check what it does.
+
+Unverified Google apps are limited to 100 users in total. If CardHaul gets close to that, it'll move to its own domain
+and complete verification.
+
 ## Getting started
 
 1. Open CardHaul. It lives in the **menu bar** (macOS) or **system tray** (Windows), and Settings opens on first launch.
-2. Click **Sign in with Google** and allow access.
+2. Click **Sign in with Google** and allow access. (Google will warn that it hasn't verified the app: [why that's OK](#google-sign-in-google-hasnt-verified-this-app).)
 3. Plug in your camera or card, click **+ Add device**, and pick it from the list (usually with the `DCIM` folder).
 4. That's it. From now on, plugging it in starts an upload. Wait for **"✅ upload verified. Safe to clear the device"**.
 
